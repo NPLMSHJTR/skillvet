@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skillvet"
+version = "0.1.0"
+description = "Static checker for Agent Skills: lint SKILL.md against the specification and against the patterns that stop skills from triggering."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "NPLMSHJTR" }]
+keywords = ["agent-skills", "codex", "claude-code", "linter", "skill-md"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Environment :: Console",
+  "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6"]
+dev = ["pytest>=7", "PyYAML>=6"]
+
+[project.scripts]
+skillvet = "skillvet.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/NPLMSHJTR/skillvet"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
