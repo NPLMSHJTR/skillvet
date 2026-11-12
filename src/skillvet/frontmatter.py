@@ -116,46 +116,173 @@ def _coerce_scalar(value: str) -> Any:
         return False
     if lowered in ("null", "~", ""):
         return None
+
+    # Integers and floats, so the fallback matches PyYAML. A version string
+    # like "1.0" is normally quoted by skill authors precisely to avoid this;
+    # _unquote runs before this function, so a quoted value stays a string.
+    try:
+        return int(value, 10)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+
     return value
 
 
 def _parse_fallback(frontmatter_text: str) -> dict[str, Any]:
-    """Parse the flat subset used by skills: scalars and one nested map level."""
+    """Parse the flat subset used by skills: scalars and one nested map level.
+
+    Anything outside that subset raises FrontmatterError rather than being
+    skipped. Silently ignoring a line is how a malformed frontmatter becomes a
+    skill with an empty name, which then fails somewhere far away from the
+    actual mistake.
+    """
     data: dict[str, Any] = {}
     current_map: dict[str, Any] | None = None
-    current_key: str | None = None
+    block_scalar: tuple[str, list[str], str] | None = None  # (style, lines, key)
+    # A block list, e.g. allowed-tools written as "- Bash" lines. Skills do
+    # contain these, and a rule (SV014) exists to explain them, so the parser
+    # has to hand the list through instead of failing before the rule runs.
+    current_list_key: str | None = None
+    items: list[Any] = []
+    # A `key:` line whose value is empty. What follows decides whether it is a
+    # list, a nested map, or a null.
+    pending_key: str | None = None
+
+    def flush_block() -> None:
+        nonlocal block_scalar
+        if block_scalar is None:
+            return
+        style, collected, key = block_scalar
+        if style == "|":
+            text = "\n".join(collected)
+        else:  # ">" folded
+            text = " ".join(part for part in collected if part)
+        data[key] = text.strip()
+        block_scalar = None
 
     for raw_line in frontmatter_text.split("\n"):
+        # While collecting a block scalar, indentation decides what belongs to it.
+        if block_scalar is not None:
+            style, collected, key = block_scalar
+            if raw_line.strip() == "":
+                collected.append("")
+                continue
+            if raw_line[:1] in (" ", "\t"):
+                collected.append(raw_line.strip())
+                continue
+            flush_block()
+
         if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
 
         stripped = raw_line.rstrip()
         indented = stripped[:1] in (" ", "\t")
 
+        if indented and current_list_key is not None:
+            item = stripped.strip()
+            if item.startswith("- "):
+                items.append(_coerce_scalar(_unquote(item[2:].strip())))
+                continue
+            if item == "-":
+                items.append(None)
+                continue
+
+        # An indented block that continues a `key:` with an empty value. It is
+        # a list if it starts with "- ", otherwise a nested map.
+        if indented and pending_key is not None:
+            item = stripped.strip()
+            if item.startswith("- "):
+                data[pending_key] = []
+                current_list_key = pending_key
+                items = data[pending_key]
+                pending_key = None
+                items.append(_coerce_scalar(_unquote(item[2:].strip())))
+                continue
+            if item == "-":
+                data[pending_key] = []
+                current_list_key = pending_key
+                items = data[pending_key]
+                pending_key = None
+                items.append(None)
+                continue
+            # Not a list, so treat it as the first entry of a nested map.
+            current_map = {}
+            data[pending_key] = current_map
+            pending_key = None
+
         if indented and current_map is not None:
             match = _KEY_LINE.match(stripped.strip())
             if match:
                 key, value = match.group(1), _strip_inline_comment(match.group(2))
-                current_map[key] = _coerce_scalar(_unquote(value))
+                nested_quoted = (
+                    len(value.strip()) >= 2
+                    and value.strip()[0] == value.strip()[-1]
+                    and value.strip()[0] in ("'", '"')
+                )
+                unquoted = _unquote(value)
+                current_map[key] = (
+                    unquoted if nested_quoted else _coerce_scalar(unquoted)
+                )
                 continue
-            continue
+            raise FrontmatterError(
+                f"cannot parse frontmatter line: {stripped.strip()!r}"
+            )
 
         match = _KEY_LINE.match(stripped)
         if not match:
-            continue
+            # A list item, a bare scalar, or anything else that is not a
+            # key/value pair. The specification wants a mapping, so this is an
+            # error and not something to skip.
+            raise FrontmatterError(
+                "frontmatter must be a mapping of keys to values; "
+                f"this line is not a `key: value` pair: {stripped.strip()!r}"
+            )
 
         key, value = match.group(1), _strip_inline_comment(match.group(2))
+        if value.strip() in ("|", ">", "|-", ">-", "|+", ">+"):
+            style = value.strip()[0]
+            block_scalar = (style, [], key)
+            current_map = None
+            current_list_key = None
+            pending_key = None
+            continue
+
         if value.strip() == "":
-            current_map = {}
-            data[key] = current_map
-            current_key = key
+            # Defer: the next indented line decides list vs map vs null.
+            current_map = None
+            current_list_key = None
+            pending_key = key
             continue
 
         current_map = None
-        current_key = None
-        data[key] = _coerce_scalar(_unquote(value))
+        current_list_key = None
+        pending_key = None
+        # Decide on the raw text: a quoted value keeps its type as a string,
+        # so `version: '1.0'` must not become the float 1.0.
+        is_quoted = (
+            len(value.strip()) >= 2
+            and value.strip()[0] == value.strip()[-1]
+            and value.strip()[0] in ("'", '"')
+        )
+        # A plain scalar containing ": " is invalid YAML, and PyYAML rejects it.
+        # Match that, so a skill that would fail to load in a real agent fails
+        # here too, instead of being quietly accepted by the lenient parser.
+        if not is_quoted and ": " in value:
+            raise FrontmatterError(
+                "frontmatter is not valid YAML: an unquoted value contains "
+                f"': ', so quote the whole value: {stripped.strip()!r}"
+            )
+        unquoted = _unquote(value)
+        data[key] = unquoted if is_quoted else _coerce_scalar(unquoted)
 
-    del current_key  # only relevant while walking indented lines
+    flush_block()
+    # A `key:` with nothing indented under it is a null value, like PyYAML.
+    if pending_key is not None:
+        data[pending_key] = None
     return data
 
 
