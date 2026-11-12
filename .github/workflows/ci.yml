@@ -35,17 +35,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install with no dependencies
-        run: python -m pip install -e .
-      - name: Confirm the fallback parser is active
+      - name: Install the package with no runtime dependencies
+        run: |
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Confirm no runtime dependency was pulled in
         run: |
           python - <<'PY'
           import skillvet.frontmatter as fm
-          assert fm._yaml is None, "PyYAML should not be installed in this job"
+          assert fm._yaml is None, "PyYAML must not be present in this job"
           print("fallback parser active")
           PY
-      - name: Run the tests that do not need PyYAML
-        run: python -m pytest tests/test_rules.py tests/test_cli.py
+      - name: Run the suite with the fallback parser forced on
+        run: python -m pytest
 
   dogfood:
     name: lint our own skills
