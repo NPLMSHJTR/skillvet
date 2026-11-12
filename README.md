@@ -7,6 +7,7 @@
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen)
 ![rules](https://img.shields.io/badge/rules-22-orange)
+[![CI](https://github.com/NPLMSHJTR/skillvet/actions/workflows/ci.yml/badge.svg)](https://github.com/NPLMSHJTR/skillvet/actions/workflows/ci.yml)
 
 A skill is a directory with a `SKILL.md`. The agent reads only `name` and
 `description` when deciding whether to load it — everything else waits. That
@@ -164,6 +165,10 @@ Three claims shape the rule set. Each is argued and sourced in
 Version 0.1.0. The rule set and the CLI contract are stable. Rules are additive;
 ids are never reused, so a suppression list will not rot.
 
+CI runs the suite on Ubuntu, Windows and macOS across Python 3.9 and 3.13, plus
+a job that installs with no third-party packages and asserts PyYAML really is
+absent — because "zero dependencies" is a claim that silently stops being true.
+
 Known gaps, stated plainly:
 
 - Trigger detection is heuristic. It matches phrase patterns, so a skill that
@@ -173,6 +178,11 @@ Known gaps, stated plainly:
   scope for now.
 - Non-English descriptions are checked for Chinese trigger phrases; other
   languages are not recognised yet.
+- The built-in fallback parser implements a subset of YAML: scalars, nested
+  maps, block lists, block scalars and nulls. Anchors, aliases, multi-document
+  files and flow style are rejected rather than guessed at.
+  `tests/test_parser_equivalence.py` asserts the two parsers agree on sixteen
+  input shapes.
 
 Issues and rule proposals are welcome. If you have a skill that `skillvet`
 misjudges, that is the most useful bug report you can send.
