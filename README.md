@@ -1,5 +1,7 @@
 # skillvet
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **A static checker for Agent Skills. It catches the mistakes that make a skill load but never fire.**
 
 ![version](https://img.shields.io/badge/version-0.1.0-blue)
@@ -31,6 +33,16 @@ P skills/changelog/SKILL.md
     no findings
 
 2 skills checked · 1 with warnings · 1 clean
+```
+
+## Workflow
+
+```mermaid
+flowchart LR
+    A["1. Author or Edit Skill<br/>(skills/<name>/SKILL.md)"] --> B["2. Run 22 Static Lint Rules<br/>(skillvet skills/)"]
+    B -->|SV001..SV022 Warning or Error| C["3. Fix Frontmatter, Trigger Phrases & Refs"]
+    C --> B
+    B -->|Exit 0| D["4. Gate in CI (--strict)"]
 ```
 
 ## What it caught on OpenAI's own skills
